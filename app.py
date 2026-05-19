@@ -2,54 +2,83 @@
 """
 Single‑file Streamlit dashboard to keep only black text from scanned forms.
 Supports images (PNG, JPG, TIFF, BMP) and multi‑page PDFs.
-
-Dependencies (install with pip):
-    streamlit opencv-python-headless numpy Pillow PyMuPDF
 """
 
 import streamlit as st
 import cv2
 import numpy as np
 from PIL import Image
-import fitz  # PyMuPDF
+import fitz
 from io import BytesIO
 import zipfile
 
+# ------------------------------------------------------------
+#  Custom CSS for a polished look
+# ------------------------------------------------------------
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        background: linear-gradient(90deg, #1e1e1e, #4a4a4a);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.5rem;
+    }
+    .sub-header {
+        color: #888;
+        font-size: 1.1rem;
+        margin-bottom: 2rem;
+    }
+    .upload-box {
+        border: 2px dashed #aaa;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        transition: border-color 0.3s;
+    }
+    .upload-box:hover {
+        border-color: #ff4b4b;
+    }
+    .stButton>button {
+        background-color: #ff4b4b;
+        color: white;
+        border-radius: 8px;
+        padding: 0.5rem 2rem;
+        font-weight: 600;
+        transition: all 0.3s;
+    }
+    .stButton>button:hover {
+        background-color: #e43e3e;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(255,75,75,0.3);
+    }
+    .footer {
+        text-align: center;
+        color: #999;
+        margin-top: 3rem;
+        font-size: 0.85rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# ============================================================
-# 1. Core filtering function (keep only black/near‑black pixels)
-# ============================================================
+# ------------------------------------------------------------
+# Core functions (unchanged)
+# ------------------------------------------------------------
 def keep_only_black(img_bgr, threshold=50, make_transparent=False):
-    """
-    Keep only black (or near‑black) pixels. Everything else becomes white or transparent.
-
-    Args:
-        img_bgr:          BGR image as numpy array
-        threshold:        Grayscale value (0–255). Pixels darker than this are kept.
-        make_transparent: If True, return RGBA with transparent background.
-
-    Returns:
-        Processed image (BGR or BGRA)
-    """
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     mask = gray <= threshold
-
     if make_transparent:
         h, w = img_bgr.shape[:2]
         out = np.zeros((h, w, 4), dtype=np.uint8)
-        out[mask] = [0, 0, 0, 255]          # black, opaque
+        out[mask] = [0, 0, 0, 255]
         return out
     else:
-        out = np.full_like(img_bgr, 255)    # white
-        out[mask] = [0, 0, 0]               # black
+        out = np.full_like(img_bgr, 255)
+        out[mask] = [0, 0, 0]
         return out
 
-
-# ============================================================
-# 2. PDF utilities (convert PDF to images and back)
-# ============================================================
 def pdf_to_images(pdf_bytes):
-    """Convert PDF bytes → list of BGR numpy arrays (one per page)."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     images = []
     for page in doc:
@@ -65,9 +94,7 @@ def pdf_to_images(pdf_bytes):
     doc.close()
     return images
 
-
 def images_to_pdf_bytes(images, dpi=300):
-    """Convert list of BGR images → PDF bytes (in memory)."""
     pdf_doc = fitz.open()
     for img in images:
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -78,9 +105,7 @@ def images_to_pdf_bytes(images, dpi=300):
     pdf_doc.close()
     return BytesIO(pdf_bytes)
 
-
 def create_zip_of_images(images, format="PNG"):
-    """Create a ZIP file containing each image as a separate file."""
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, img in enumerate(images):
@@ -90,59 +115,47 @@ def create_zip_of_images(images, format="PNG"):
     zip_buffer.seek(0)
     return zip_buffer
 
+# ------------------------------------------------------------
+#  UI Layout
+# ------------------------------------------------------------
+st.set_page_config(page_title="FormCleaner – Black Text Only", layout="wide", page_icon="📝")
 
-# ============================================================
-# 3. Streamlit user interface
-# ============================================================
-st.set_page_config(page_title="Form Colour Filter", layout="wide")
-st.title("📝 Keep Only Black Text – Form Cleaner (Image & PDF)")
-st.markdown(
-    "Upload a scanned form (image or PDF), adjust the black threshold, "
-    "and download the result with only black text remaining."
-)
+# Header
+st.markdown('<div class="main-header">📝 FormCleaner</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Remove all colors, keep only black text. Upload images or PDFs.</div>', unsafe_allow_html=True)
 
-# Sidebar controls
-st.sidebar.header("⚙️ Settings")
-threshold = st.sidebar.slider(
-    "Black threshold",
-    0, 255, 50, 5,
-    help="Pixels darker than this value are kept as black. Lower = stricter 'black only'."
-)
-transparent_bg = st.sidebar.checkbox(
-    "Transparent background (images only)",
-    False,
-    help="If checked, the background becomes transparent (PNG only, not for PDF)."
-)
+# Settings in an expander for a cleaner look
+with st.sidebar:
+    st.header("⚙️ Settings")
+    threshold = st.slider("Black threshold", 0, 255, 50, 5,
+                          help="Lower = stricter black. Only pixels darker than this value are kept.")
+    transparent_bg = st.checkbox("Transparent background (images only)", False,
+                                 help="Creates a PNG with transparent background (not for PDFs).")
+    st.markdown("---")
+    st.caption("Made with ❤️ by Bipul Das")
 
-# File uploader – accepts images and PDF
+# Main area
 uploaded_file = st.file_uploader(
-    "Choose an image or PDF",
-    type=["png", "jpg", "jpeg", "tiff", "bmp", "pdf"]
+    "Drag & drop your file here",
+    type=["png", "jpg", "jpeg", "tiff", "bmp", "pdf"],
+    help="Limit: 200MB per file"
 )
 
 if uploaded_file is not None:
     file_type = uploaded_file.name.split(".")[-1].lower()
 
     if file_type == "pdf":
-        # ------------------------------------------------------------
         # PDF processing
-        # ------------------------------------------------------------
-        st.subheader("PDF processing")
-        with st.spinner("Converting PDF pages to images..."):
+        with st.spinner("🔄 Processing PDF pages..."):
             pdf_bytes = uploaded_file.read()
             pages_bgr = pdf_to_images(pdf_bytes)
-        st.success(f"Loaded {len(pages_bgr)} page(s).")
+        st.success(f"✅ Loaded {len(pages_bgr)} page(s)")
 
-        if not pages_bgr:
-            st.error("Could not read any pages from the PDF.")
-        else:
-            # Process all pages
+        if pages_bgr:
             processed_pages = []
-            progress_bar = st.progress(0)
             for i, page in enumerate(pages_bgr):
-                processed = keep_only_black(page, threshold, make_transparent=False)
+                processed = keep_only_black(page, threshold)
                 processed_pages.append(processed)
-                progress_bar.progress((i + 1) / len(pages_bgr))
 
             # Preview first page
             col1, col2 = st.columns(2)
@@ -154,86 +167,71 @@ if uploaded_file is not None:
                 st.image(cv2.cvtColor(processed_pages[0], cv2.COLOR_BGR2RGB), use_container_width=True)
 
             # Download options
-            st.subheader("Download")
-            download_option = st.radio(
-                "Output format:",
-                ("PDF (all pages)", "ZIP of images (PNG)"),
-                index=0
-            )
-
-            if download_option.startswith("PDF"):
+            st.subheader("📥 Download cleaned result")
+            download_choice = st.radio("Format:", ["PDF (all pages)", "ZIP of PNG images"], horizontal=True)
+            if download_choice.startswith("PDF"):
                 pdf_buffer = images_to_pdf_bytes(processed_pages)
-                st.download_button(
-                    label="📥 Download cleaned PDF",
-                    data=pdf_buffer,
-                    file_name="cleaned_form.pdf",
-                    mime="application/pdf"
-                )
+                st.download_button("Download PDF", data=pdf_buffer,
+                                   file_name="cleaned_form.pdf", mime="application/pdf")
             else:
-                zip_buffer = create_zip_of_images(processed_pages, format="PNG")
-                st.download_button(
-                    label="📥 Download ZIP of images",
-                    data=zip_buffer,
-                    file_name="cleaned_pages.zip",
-                    mime="application/zip"
-                )
-
+                zip_buffer = create_zip_of_images(processed_pages)
+                st.download_button("Download ZIP", data=zip_buffer,
+                                   file_name="cleaned_pages.zip", mime="application/zip")
     else:
-        # ------------------------------------------------------------
-        # Single image processing
-        # ------------------------------------------------------------
+        # Image processing
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
         if img_bgr is None:
-            st.error("Could not read the image. Please try a different file.")
+            st.error("❌ Could not read the image. Please try a different file.")
         else:
             processed = keep_only_black(img_bgr, threshold, make_transparent=transparent_bg)
 
             # Display
-            if transparent_bg:
-                display_img = Image.fromarray(processed, "RGBA")
-            else:
-                display_img = Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB))
-            original_display = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Original")
-                st.image(original_display, use_container_width=True)
+                st.image(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), use_container_width=True)
             with col2:
                 st.subheader("Filtered (only black text)")
-                st.image(display_img, use_container_width=True)
+                if transparent_bg:
+                    st.image(Image.fromarray(processed, "RGBA"), use_container_width=True)
+                else:
+                    st.image(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB), use_container_width=True)
 
             # Download
             if transparent_bg:
                 success, encoded = cv2.imencode(".png", cv2.cvtColor(processed, cv2.COLOR_RGBA2BGRA))
                 mime = "image/png"
-                download_ext = "png"
+                ext = "png"
             else:
-                output_format = st.sidebar.selectbox(
-                    "Output format", ["PNG", "JPEG"], index=0, disabled=transparent_bg
-                )
+                output_format = st.radio("Output format:", ["PNG", "JPEG"], horizontal=True)
                 if output_format == "PNG":
                     success, encoded = cv2.imencode(".png", processed)
                     mime = "image/png"
-                    download_ext = "png"
+                    ext = "png"
                 else:
                     success, encoded = cv2.imencode(".jpg", processed, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
                     mime = "image/jpeg"
-                    download_ext = "jpg"
+                    ext = "jpg"
 
             if success:
-                st.download_button(
-                    label="📥 Download filtered image",
-                    data=encoded.tobytes(),
-                    file_name=f"clean_form.{download_ext}",
-                    mime=mime
-                )
+                st.download_button("📥 Download cleaned image", data=encoded.tobytes(),
+                                   file_name=f"clean_form.{ext}", mime=mime)
             else:
-                st.error("Error encoding image for download.")
-else:
-    st.info("👆 Upload an image or PDF to get started.")
+                st.error("Error encoding image.")
 
-st.sidebar.markdown("---")
-st.sidebar.caption("Built with Streamlit, OpenCV & PyMuPDF")
+else:
+    # Empty state
+    st.markdown("""
+    <div style="display: flex; justify-content: center; margin-top: 2rem;">
+        <div style="text-align: center; max-width: 400px;">
+            <h3>✨ Simple & Fast</h3>
+            <p style="color: #666;">Upload a scanned form, adjust the threshold, and download a perfectly clean document in seconds.</p>
+            <p style="color: #999; font-size: 0.9rem;">Supports JPG, PNG, TIFF, BMP, and multi-page PDFs.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Footer
+st.markdown('<div class="footer">Built with Streamlit • OpenCV • PyMuPDF</div>', unsafe_allow_html=True)
